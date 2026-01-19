@@ -31,7 +31,7 @@ function getRandomUserAgent() {
 }
 
 // Default axios headers/timeout
-axios.defaults.timeout = 10000;
+axios.defaults.timeout = 30000; // Increased timeout for proxy
 axios.defaults.headers.common['Accept'] = 'application/json, text/plain, */*';
 axios.defaults.headers.common['Accept-Language'] = 'en-US,en;q=0.9';
 
@@ -41,6 +41,40 @@ let globalConfig = {
   limit: 24,
   warehouseId: null
 };
+
+/**
+ * Helper to fetch data, optionally using ScraperAPI if configured
+ */
+async function fetchWithProxy(url, config = {}) {
+  const apiKey = process.env.SCRAPER_API_KEY;
+
+  if (apiKey) {
+    console.log(`[Proxy] Routing request via ScraperAPI: ${url}`);
+    
+    // ScraperAPI requires the target URL to be encoded in the 'url' query param
+    const proxyUrl = 'http://api.scraperapi.com';
+    
+    // Merge original params into the URL for the proxy
+    let targetUrl = url;
+    if (config.params) {
+      const qs = new URLSearchParams(config.params).toString();
+      targetUrl += `?${qs}`;
+    }
+
+    return axios.get(proxyUrl, {
+      params: {
+        api_key: apiKey,
+        url: targetUrl,
+        // Optional: keep_headers=true allows passing custom headers like Referer
+        keep_headers: true
+      },
+      headers: config.headers // Pass original headers
+    });
+  } else {
+    // Direct connection (for local dev)
+    return axios.get(url, config);
+  }
+}
 
 /**
  * Run the Costco item availability workflow
@@ -68,7 +102,7 @@ async function runWorkflow(inputs) {
       // Step 1: Geocode zip code
       console.log(`[Workflow] Resolving Zip Code: ${zipCode}`);
       const geoUrl = "https://geocodeservice.costco.com/Locations";
-      const geoResp = await axios.get(geoUrl, {
+      const geoResp = await fetchWithProxy(geoUrl, {
         params: { q: inputs.zipCode },
         headers: { 
           'Referer': 'https://www.costco.com/',
@@ -81,7 +115,7 @@ async function runWorkflow(inputs) {
       // Step 2: Find nearest warehouse
       console.log(`[Workflow] Finding nearest warehouse to ${latitude}, ${longitude}`);
       const whUrl = "https://ecom-api.costco.com/core/warehouse-locator/v1/warehouses.json";
-      const whResp = await axios.get(whUrl, {
+      const whResp = await fetchWithProxy(whUrl, {
         params: {
           latitude,
           longitude,
@@ -119,7 +153,7 @@ async function runWorkflow(inputs) {
         fq: '{!tag=item_program_eligibility}item_program_eligibility:("InWarehouse")'
       };
       
-      const response = await axios.get(searchUrl, {
+      const response = await fetchWithProxy(searchUrl, {
         params,
         headers: {
           'Referer': 'https://www.costco.com/',
